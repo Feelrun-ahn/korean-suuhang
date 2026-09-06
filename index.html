@@ -30,6 +30,12 @@ button{font:inherit;color:inherit;cursor:pointer}
 .tally .big{font-family:"Noto Serif KR",serif;font-size:26px;font-weight:600;line-height:1}
 .tally .of{font-size:13px;color:var(--ink-3)}
 
+.allbox{display:flex;gap:8px;margin:14px 0 4px}
+.allbtn{flex:1;border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:8px;
+  padding:12px 13px;text-align:left;transition:opacity .15s}
+.allbtn:active{opacity:.85}
+.allbtn b{display:block;font-size:13.5px;font-weight:500}
+.allbtn span{font-size:11.5px;opacity:.7;font-variant-numeric:tabular-nums}
 .rows{margin-top:8px}
 .row{border-top:1px solid var(--rule-2);position:relative}
 .row:first-child{border-top:1px solid var(--rule)}
@@ -212,7 +218,7 @@ function home(){
     +'<div class="by">만든 사람 · 안태현</div></div><div class="hr"></div>'
     +'<div class="tally"><span class="big">'+worksDone+'</span><span class="of">/ '+WORKS.length+' 작품 통과</span>'
     +'<span class="of" style="margin-left:auto">'+qDone+' / '+qAll+' 문항</span></div>'
-    +'<div class="rows">'+rows+'</div>'
+    +'<div class="allbox">'    +'<button class="allbtn" data-all="story"><b>전체 작품 줄거리 랜덤</b><span>'+allDone('story')+' / '+allTotal('story')+'</span></button>'    +'<button class="allbtn" data-all="blank"><b>전체 작품 이론 빈칸 랜덤</b><span>'+allDone('blank')+' / '+allTotal('blank')+'</span></button></div>'    +'<div class="rows">'+rows+'</div>'
     +'<div class="nb"><h3>오답 노트</h3><p class="cap">틀린 횟수가 많은 순서예요.</p>'
     +(missList.length?missList.map(m=>'<div class="miss"><span class="n">'+m.c+'회</span><div><em>'
         +m.w+' · '+m.set+' '+m.n+'번</em>'+esc(m.q)+'</div></div>').join("")
@@ -227,6 +233,7 @@ function home(){
     +'<div id="dumpbox" style="width:100%"></div></div>';
 
   requestAnimationFrame(()=>document.querySelectorAll("[data-fill]").forEach(b=>b.style.width=b.dataset.fill+"%"));
+  document.querySelectorAll("[data-all]").forEach(b=>b.onclick=()=>startAll(b.dataset.all));
   document.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>{openId=openId===b.dataset.open?null:b.dataset.open;home();});
   document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{const p=b.dataset.go.split(":");start(p[0],p[1]);});
   el("mode").onchange=e=>{ST.mode=e.target.value;save();home();};
@@ -239,58 +246,78 @@ function home(){
     el("dumpbox").querySelector("textarea").select();
   };
 }
+const allTotal = set=>WORKS.reduce((a,w)=>a+w[set].length,0);
+const allDone  = set=>WORKS.reduce((a,w)=>a+nDone(w,set),0);
 function setBtn(w,set){
   const d=nDone(w,set), a=w[set].length;
   return '<button class="pill'+(d===a?" full":"")+'" data-go="'+w.id+':'+set+'"><b>'+SETS[set]+'</b><span>'+d+' / '+a+' 통과</span></button>';
 }
 
 /* ---------- 풀이 ---------- */
+function begin(items,title,set){
+  cur={items:null,title:title,set:set,queue:shuffle(items),total:items.length,cleared:0,last:null};
+  ask();
+}
 function start(wid,set){
   const w=WORKS.find(x=>x.id===wid);
   let todo=w[set].map((_,i)=>i).filter(i=>!ST.passed[key(w,set,i)]);
   if(!todo.length){ w[set].forEach((_,i)=>delete ST.passed[key(w,set,i)]); todo=w[set].map((_,i)=>i); }
-  cur={w,set,queue:shuffle(todo),total:todo.length,cleared:0};
-  ask();
+  cur={backTo:w.id};
+  begin(todo.map(i=>({w:w,set:set,i:i})), w.name, set);
+  cur.backTo=w.id;
+}
+function startAll(set){
+  let todo=[];
+  WORKS.forEach(w=>w[set].forEach((_,i)=>{ if(!ST.passed[key(w,set,i)]) todo.push({w:w,set:set,i:i}); }));
+  if(!todo.length){
+    WORKS.forEach(w=>w[set].forEach((_,i)=>delete ST.passed[key(w,set,i)]));
+    WORKS.forEach(w=>w[set].forEach((_,i)=>todo.push({w:w,set:set,i:i})));
+  }
+  begin(todo, "전체 작품", set);
+  cur.all=true;
 }
 function shell(inner){
-  const {w,set}=cur, pct=cur.total?cur.cleared/cur.total*100:0;
+  const pct=cur.total?cur.cleared/cur.total*100:0;
   el("app").innerHTML=
-    '<div class="qtop"><button class="back" id="back">←</button><span class="where">'+w.name+' · '+SETS[set]+'</span>'
+    '<div class="qtop"><button class="back" id="back">←</button><span class="where">'+cur.title+' · '+SETS[cur.set]+'</span>'
     +'<span class="count">'+cur.cleared+' / '+cur.total+'</span></div>'
     +'<div class="pbar"><i style="width:'+pct+'%"></i></div><div class="fade">'+inner+'</div>';
-  el("back").onclick=()=>{openId=cur.w.id;home();};
+  el("back").onclick=()=>{ openId=cur.backTo||null; home(); };
 }
 function ask(){
   if(!cur.queue.length) return finish();
-  const {w,set}=cur, i=cur.queue[0], q=getQ(w,set,i), isB=set==="blank";
+  const it=cur.queue[0], q=getQ(it.w,it.set,it.i), isB=it.set==="blank";
   shell(
-    '<p class="q'+(isB?" small":"")+'">'+(isB?q.disp.replace(/\(\s*\)/,'<span class="gap">(&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)</span>'):esc(q.q))+'</p>'
+    (cur.all?'<p class="hint" style="text-align:left;margin:22px 0 -14px">'+esc(it.w.name)+'</p>':'')
+    +'<p class="q'+(isB?" small":"")+'">'
+    +(isB?q.disp.replace(/\(\s*\)/,'<span class="gap">(&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;)</span>'):esc(q.q))+'</p>'
     +(isB?'<input id="ans" class="fill" placeholder="빈칸에 들어갈 말" autocomplete="off">'
         :'<textarea id="ans" placeholder="문장으로 써 보세요."></textarea>')
     +'<div class="actions"><button class="btn" id="go">채점하기</button></div>'
-    +'<p class="hint">'+SETNAME[set]+' '+q.n+'번 · 남은 문제 '+cur.queue.length+'개</p>'
+    +'<p class="hint">'+it.w.name+' '+SETNAME[it.set]+' '+q.n+'번 · 남은 문제 '+cur.queue.length+'개</p>'
   );
   const t=el("ans"); t.focus();
   el("go").onclick=check;
   t.onkeydown=e=>{ if(e.key==="Enter"&&(isB||e.metaKey||e.ctrlKey)){e.preventDefault();check();} };
 }
 function check(){
-  const i=cur.queue[0];
-  cur.last={i,mine:el("ans").value};
-  apply(grade(cur.last.mine,getQ(cur.w,cur.set,i)).ok,true);
+  const it=cur.queue[0];
+  cur.last={it:it,mine:el("ans").value};
+  apply(grade(cur.last.mine,getQ(it.w,it.set,it.i)).ok,true);
 }
+function same(a,b){ return a.w.id===b.w.id && a.set===b.set && a.i===b.i; }
 function apply(ok,auto){
-  const {w,set}=cur, i=cur.last.i, q=getQ(w,set,i), k=key(w,set,i), mine=cur.last.mine;
-  const r=grade(mine,q), isB=set==="blank";
+  const it=cur.last.it, q=getQ(it.w,it.set,it.i), k=key(it.w,it.set,it.i), mine=cur.last.mine;
+  const r=grade(mine,q), isB=it.set==="blank";
   if(!auto){
     if(cur.last.ok&&!ok){ delete ST.passed[k]; cur.cleared=Math.max(0,cur.cleared-1);
-      ST.miss[k]=(ST.miss[k]||0)+1; if(!cur.queue.includes(i)) cur.queue=cur.queue.concat([i]); }
+      ST.miss[k]=(ST.miss[k]||0)+1; if(!cur.queue.some(x=>same(x,it))) cur.queue=cur.queue.concat([it]); }
     if(!cur.last.ok&&ok){ ST.passed[k]=true; cur.cleared++;
       if(ST.miss[k]){ST.miss[k]--; if(!ST.miss[k]) delete ST.miss[k];}
-      cur.queue=cur.queue.filter(x=>x!==i); }
+      cur.queue=cur.queue.filter(x=>!same(x,it)); }
   }else{
     if(ok){ ST.passed[k]=true; cur.queue=cur.queue.slice(1); cur.cleared++; }
-    else{ ST.miss[k]=(ST.miss[k]||0)+1; cur.queue=cur.queue.slice(1).concat([i]); }
+    else{ ST.miss[k]=(ST.miss[k]||0)+1; cur.queue=cur.queue.slice(1).concat([it]); }
   }
   cur.last.ok=ok; save();
 
@@ -306,7 +333,9 @@ function apply(ok,auto){
 
   shell(
     '<div class="verdict'+(ok?"":" no")+'"><h2>'+(ok?"통과":"다시")+'</h2><p>'+why+'</p></div>'
-    +'<p class="q small" style="margin:16px 0 0">'+(isB?q.disp.replace(/\(\s*\)/,'<span class="gap">( '+esc(q.a)+' )</span>'):esc(q.q))+'</p>'
+    +'<p class="hint" style="text-align:left;margin:14px 0 -10px">'+esc(it.w.name)+' · '+SETNAME[it.set]+' '+q.n+'번</p>'
+    +'<p class="q small" style="margin:16px 0 0">'
+    +(isB?q.disp.replace(/\(\s*\)/,'<span class="gap">( '+esc(q.a)+' )</span>'):esc(q.q))+'</p>'
     +(chips?'<div class="chips">'+chips+'</div>':'')
     +'<p class="sect">내가 쓴 답</p><div class="mine">'+esc(mine||"(빈칸)")+'</div>'
     +(isB?((q.alt||[]).length?'<p class="sect">허용 표기</p><div class="mine">'+esc(q.alt.join(", "))+'</div>':'')
@@ -321,13 +350,13 @@ function apply(ok,auto){
   document.querySelectorAll("[data-flip]").forEach(b=>b.onclick=()=>{
     const v=b.dataset.flip==="1"; if(v!==cur.last.ok) apply(v,false);
   });
-  if(el("edit")) el("edit").onclick=()=>editor(i);
+  if(el("edit")) el("edit").onclick=()=>editor(it);
   el("next").onclick=ask;
   window.scrollTo(0,0);
 }
 
-function editor(i){
-  const {w,set}=cur, q=getQ(w,set,i), k=key(w,set,i), edited=!!ST.edits[k];
+function editor(it){
+  const q=getQ(it.w,it.set,it.i), k=key(it.w,it.set,it.i), edited=!!ST.edits[k];
   shell(
     '<div class="ed"><p class="q small" style="margin:8px 0 0">'+esc(q.q)+'</p>'
     +'<label>선생님 답안 (그대로 두는 걸 권장)</label><textarea class="a" id="e-a">'+esc(q.a)+'</textarea>'
@@ -341,26 +370,30 @@ function editor(i){
     +(edited?'<div class="actions" style="margin-top:8px"><button class="btn line" id="e-undo">원래대로 되돌리기</button></div>':'')
     +'</div>'
   );
+  const back=()=>{ if(cur.last&&same(cur.last.it,it)) apply(grade(cur.last.mine,getQ(it.w,it.set,it.i)).ok,true); else ask(); };
   el("e-save").onclick=()=>{
     const a=el("e-a").value.trim();
     const ks=el("e-k").value.split("\n").map(l=>l.split(",").map(s=>s.trim()).filter(Boolean)).filter(g=>g.length);
     const xs=el("e-x").value.split(",").map(s=>s.trim()).filter(Boolean);
     if(!a||!ks.length){el("e-a").focus();return;}
-    ST.edits[k]={a,k:ks,x:xs}; save();
-    if(cur.last&&cur.last.i===i) apply(grade(cur.last.mine,getQ(w,set,i)).ok,true); else ask();
+    ST.edits[k]={a,k:ks,x:xs}; save(); back();
   };
-  el("e-cancel").onclick=()=>{ if(cur.last&&cur.last.i===i) apply(cur.last.ok,false); else ask(); };
-  if(edited) el("e-undo").onclick=()=>{ delete ST.edits[k]; save();
-    if(cur.last&&cur.last.i===i) apply(grade(cur.last.mine,getQ(w,set,i)).ok,true); else ask(); };
+  el("e-cancel").onclick=()=>{ if(cur.last&&same(cur.last.it,it)) apply(cur.last.ok,false); else ask(); };
+  if(edited) el("e-undo").onclick=()=>{ delete ST.edits[k]; save(); back(); };
 }
 
 function finish(){
-  const {w,set}=cur, whole=nDoneAll(w)===nAll(w);
-  openId=w.id; home();
+  const set=cur.set, isAll=!!cur.all;
+  const w = isAll ? null : WORKS.find(x=>x.id===cur.backTo);
+  const whole = w ? nDoneAll(w)===nAll(w) : false;
+  if(w) openId=w.id;
+  home();
   const v=document.createElement("div"); v.className="veil";
-  v.innerHTML='<div class="card"><div class="seal">'+(whole?"通":"半")+'</div><h3>'+w.name
-    +(whole?" 통과":" · "+SETS[set]+" 완료")+'</h3><p>'
-    +(whole?"줄거리와 이론을 모두 맞혔어요.":"남은 쪽도 마저 풀어 보세요.")
+  const head = isAll ? "全" : (whole?"通":"半");
+  const title = isAll ? ("전체 " + SETNAME[set] + " 완주") : (w.name + (whole?" 통과":" · "+SETS[set]+" 완료"));
+  const sub = isAll ? "10작품 " + SETNAME[set] + " 문제를 모두 맞혔어요."
+                    : (whole?"줄거리와 이론을 모두 맞혔어요.":"남은 쪽도 마저 풀어 보세요.");
+  v.innerHTML='<div class="card"><div class="seal">'+head+'</div><h3>'+title+'</h3><p>'+sub
     +'</p><button class="btn" id="ok">목록으로</button></div>';
   document.body.appendChild(v);
   v.querySelector("#ok").onclick=()=>v.remove();
